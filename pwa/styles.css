@@ -190,6 +190,34 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
   border-radius: 22px; padding: 48px 24px;
 }
 .final-cta h2 { font-size: 30px; }
+.final-cta .fine { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+
+/* ---------- real playbook samples ---------- */
+.samples { margin-top: 56px; text-align: center; }
+.sample-pages {
+  display: grid; gap: 18px; margin-top: 24px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+.sample-pages figure { margin: 0; max-width: 340px; }
+.sample-pages img {
+  width: 100%; height: auto; display: block;
+  border-radius: 10px; border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  background: #fff;
+}
+.sample-pages figcaption { color: var(--muted); font-size: 13px; margin-top: 10px; }
+@media (min-width: 720px) { .sample-pages { grid-template-columns: repeat(3, 1fr); } }
+
+/* ---------- buy forms ---------- */
+.buy-form { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.buy-form-final { max-width: 460px; margin: 22px auto 0; }
+.buy-form .status:empty { display: none; }
+@media (min-width: 560px) {
+  .buy-form-final { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .buy-form-final .buy-email { flex: 1 1 220px; }
+  .buy-form-final .buy-status { flex-basis: 100%; }
+}
 
 /* ---------- intake form ---------- */
 .intake {

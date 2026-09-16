@@ -22,13 +22,18 @@ function json(data, status = 200) {
 
 const FULL_SYSTEM = `You are a calm, practical emergency-preparedness advisor writing a personalized household playbook. Audience: ordinary families, not survivalists. Tone: steady, specific, reassuring — NEVER fear-mongering, never dramatic, never apocalyptic. All costs in USD. Quantities must be scaled to the household size given. Output ONLY the JSON object described. No prose, no markdown fences. No medical advice beyond a basic first-aid kit. No guarantees of safety — practical readiness only.`;
 
-function fullUser(intake) {
+// NOTE (2026-09-16): @cf/meta/llama-3.3-70b-instruct-fp8-fast caps output at
+// 4096 tokens on Workers AI. The original single-call playbook (max_tokens
+// 6000) blew past that and failed validation on every retry. Generation is
+// therefore split into TWO calls (kitchen/water/food, then power/buy/region),
+// each comfortably under the cap, merged before PDF render.
+
+function part1User(intake) {
   const region = REGIONS[intake.region];
-  const budget = BUDGET_TIERS[intake.budget_tier];
   const wm = waterMath(intake);
   const kidBit = intake.kids > 0 ? `${intake.kids} kid(s)` : "no kids";
   const petBit = intake.pets > 0 ? `${intake.pets} pet(s)` : "no pets";
-  return `Write the full personalized survival-preparedness playbook for: ${intake.adults} adult(s), ${kidBit}, ${petBit}, living in a ${intake.home_type} in the ${region.label} region (main hazards: ${region.hazards}). Budget tier: "${budget.label}" (${budget.range}) — the buy list must be realistic for this budget and ordered by impact-per-dollar.
+  return `Write PART 1 of a personalized survival-preparedness playbook for: ${intake.adults} adult(s), ${kidBit}, ${petBit}, living in a ${intake.home_type} in the ${region.label} region (main hazards: ${region.hazards}).
 
 Water math (use these exact numbers): ${wm.gallons_per_day} gallons/day total, ${wm.gallons_72h} gallons for 72 hours.
 
@@ -38,22 +43,34 @@ Respond with ONLY this JSON object:
   "water": {"gallons_per_day": ${wm.gallons_per_day}, "gallons_72h": ${wm.gallons_72h},
     "storage_options": [{"option": "...", "detail": "..."}],
     "rotation_tips": ["..."]},
-  "food": {"daily_calories_per_person": <number>, "staples": [{"item": "...", "qty_30d": "..."}], "meal_ideas": ["..."], "notes": "..."},
-  "power": {"before": ["..."], "during": ["..."], "after": ["..."]},
-  "buy_list": [{"priority": 1, "item": "...", "est_cost_usd": <number>, "why": "..."}],
-  "region_notes": ["..."]
+  "food": {"daily_calories_per_person": <number>, "staples": [{"item": "...", "qty_30d": "..."}], "meal_ideas": ["..."], "notes": "..."}
 }
 Rules:
 - checklist: 5-7 categories, 4-8 items each, quantities scaled to THIS household, notes brief and practical.
 - water: 3-5 storage options suited to a ${intake.home_type} (apartments can't store 55-gal drums), 3-5 rotation tips.
 - food: 10-16 staples with 30-day quantities for THIS household, 5-8 no-cook-friendly meal ideas, shelf-stable focus.
+- Practical, brand-agnostic, calm. No fear-mongering.`; }
+
+function part2User(intake) {
+  const region = REGIONS[intake.region];
+  const budget = BUDGET_TIERS[intake.budget_tier];
+  const kidBit = intake.kids > 0 ? `${intake.kids} kid(s)` : "no kids";
+  const petBit = intake.pets > 0 ? `${intake.pets} pet(s)` : "no pets";
+  return `Write PART 2 of a personalized survival-preparedness playbook for: ${intake.adults} adult(s), ${kidBit}, ${petBit}, living in a ${intake.home_type} in the ${region.label} region (main hazards: ${region.hazards}). Budget tier: "${budget.label}" (${budget.range}) — the buy list must be realistic for this budget and ordered by impact-per-dollar.
+
+Respond with ONLY this JSON object:
+{
+  "power": {"before": ["..."], "during": ["..."], "after": ["..."]},
+  "buy_list": [{"priority": 1, "item": "...", "est_cost_usd": <number>, "why": "..."}],
+  "region_notes": ["..."]
+}
+Rules:
 - power: 5-8 steps each for before/during/after an outage, specific to ${intake.home_type} living.
 - buy_list: at most 15 items, priority 1 = highest impact first, est_cost_usd realistic US prices, total roughly within the ${budget.label} tier (${budget.range}).
 - region_notes: 3-5 notes specific to ${region.hazards} in the ${region.label} region.
-- Practical, brand-agnostic, calm. No fear-mongering.`;
-}
+- Practical, brand-agnostic, calm. No fear-mongering.`; }
 
-function validPlaybook(d) {
+function validPart1(d) {
   if (!d || typeof d !== "object") return "not_an_object";
   const cats = d.checklist && d.checklist.categories;
   if (!Array.isArray(cats) || cats.length < 4 || cats.length > 8) return "bad_checklist";
@@ -67,6 +84,11 @@ function validPlaybook(d) {
   const f = d.food || {};
   if (!Array.isArray(f.staples) || f.staples.length < 6) return "bad_food_staples";
   if (!Array.isArray(f.meal_ideas) || f.meal_ideas.length < 3) return "bad_food_meals";
+  return true;
+}
+
+function validPart2(d) {
+  if (!d || typeof d !== "object") return "not_an_object";
   const p = d.power || {};
   for (const k of ["before", "during", "after"]) {
     if (!Array.isArray(p[k]) || p[k].length < 3) return "bad_power_" + k;
@@ -160,15 +182,26 @@ export async function onRequestPost({ request, env }) {
     if (!v.ok) return fail("invalid_intake:" + v.error);
     const intake = v.intake;
 
-    // ── AI: full playbook JSON ──
-    let parsed;
+    // ── AI: full playbook JSON, in two under-the-cap calls ──
+    let p1, p2;
     try {
-      ({ parsed } = await runJson(env, FULL_SYSTEM, fullUser(intake), {
-        max_tokens: 6000, temperature: 0.5, retries: 2, label: "playbook", validate: validPlaybook,
+      ({ parsed: p1 } = await runJson(env, FULL_SYSTEM, part1User(intake), {
+        max_tokens: 3200, temperature: 0.5, retries: 2, label: "playbook-part1", validate: validPart1,
+      }));
+      ({ parsed: p2 } = await runJson(env, FULL_SYSTEM, part2User(intake), {
+        max_tokens: 2600, temperature: 0.5, retries: 2, label: "playbook-part2", validate: validPart2,
       }));
     } catch (e) {
       return fail(String((e && e.message) || e).slice(0, 160));
     }
+    const parsed = {
+      checklist: p1.checklist,
+      water: p1.water,
+      food: p1.food,
+      power: p2.power,
+      buy_list: p2.buy_list,
+      region_notes: p2.region_notes,
+    };
 
     // ── render PDF ──
     // Keep the paid checklist's Water quantities consistent with the

@@ -110,32 +110,22 @@
     });
   }
 
-  // ---------- checkout ----------
-  var buyForm = $("buy-form");
-  var buyBtn = $("buy-btn");
-  var buyEmail = $("buy-email");
-  var buyStatus = $("buy-status");
-
-  var FRIENDLY = {
-    invalid_email: "That email doesn't look right — double-check it?",
-    invalid_product: "This product isn't available right now — try again in a bit.",
-    params_too_large: "Something odd with the form data — refresh and try again.",
-    stripe_test_not_configured: "Checkout isn't ready yet — try again in a bit.",
-    stripe_not_configured: "Checkout isn't ready yet — try again in a bit.",
-    checkout_failed: "Couldn't start checkout — please try again.",
-  };
-
-  if (buyForm) {
-    buyForm.addEventListener("submit", function (e) {
+  // ---------- checkout (wires every form.buy-form on the page) ----------
+  function wireBuyForm(form) {
+    var emailEl = form.querySelector(".buy-email");
+    var btn = form.querySelector(".buy-btn");
+    var statusEl = form.querySelector(".buy-status");
+    if (!emailEl || !btn || !statusEl) return;
+    form.addEventListener("submit", function (e) {
       e.preventDefault();
-      var email = (buyEmail.value || "").trim();
+      var email = (emailEl.value || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        setStatus(buyStatus, "error", "Enter your email so we can deliver your playbook.");
-        buyEmail.focus();
+        setStatus(statusEl, "error", "Enter your email so we can deliver your playbook.");
+        emailEl.focus();
         return;
       }
-      buyBtn.disabled = true;
-      setStatus(buyStatus, "busy", "Starting secure checkout…");
+      btn.disabled = true;
+      setStatus(statusEl, "busy", "Starting secure checkout…");
       fetch(CHECKOUT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,19 +141,30 @@
         .then(function (res) {
           var d = res.body;
           if (!d.ok || !d.checkout_url) {
-            buyBtn.disabled = false;
-            setStatus(buyStatus, "error", FRIENDLY[d.error] || "Couldn't start checkout — please try again.");
+            btn.disabled = false;
+            setStatus(statusEl, "error", FRIENDLY[d.error] || "Couldn't start checkout — please try again.");
             return;
           }
-          setStatus(buyStatus, "busy", "Taking you to secure checkout…");
+          setStatus(statusEl, "busy", "Taking you to secure checkout…");
           window.location.href = d.checkout_url;
         })
         .catch(function () {
-          buyBtn.disabled = false;
-          setStatus(buyStatus, "error", "Network hiccup — please try again.");
+          btn.disabled = false;
+          setStatus(statusEl, "error", "Network hiccup — please try again.");
         });
     });
   }
+
+  document.querySelectorAll("form.buy-form").forEach(wireBuyForm);
+
+  var FRIENDLY = {
+    invalid_email: "That email doesn't look right — double-check it?",
+    invalid_product: "This product isn't available right now — try again in a bit.",
+    params_too_large: "Something odd with the form data — refresh and try again.",
+    stripe_test_not_configured: "Checkout isn't ready yet — try again in a bit.",
+    stripe_not_configured: "Checkout isn't ready yet — try again in a bit.",
+    checkout_failed: "Couldn't start checkout — please try again.",
+  };
 
   // ---------- reveal on scroll ----------
   var io = null;
