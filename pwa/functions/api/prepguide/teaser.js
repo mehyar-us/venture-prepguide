@@ -5,7 +5,7 @@
 // Abuse control: D1-backed per-IP daily cap (10/day), fail-open on DB errors.
 
 import { runJson } from "../../_lib/ai.js";
-import { validateIntake, householdLabel, waterMath, REGIONS, BUDGET_TIERS } from "../../_lib/validate.js";
+import { validateIntake, householdLabel, waterMath, alignWaterItems, REGIONS, BUDGET_TIERS } from "../../_lib/validate.js";
 
 const RL_CAP = 10; // teasers per IP per day
 
@@ -45,19 +45,22 @@ async function checkRateLimit(env, request) {
 
 const TEASER_SYSTEM = `You are a calm, practical emergency-preparedness advisor. You write for ordinary households, not survivalists. Tone: steady, specific, reassuring — never fear-mongering, never dramatic. Output ONLY the JSON object described. No prose, no markdown fences.`;
 
-function teaserUser(intake) {
+export function teaserUser(intake) {
   const region = REGIONS[intake.region];
   const budget = BUDGET_TIERS[intake.budget_tier];
+  const wm = waterMath(intake);
   const kidBit = intake.kids > 0 ? `, ${intake.kids} kid(s)` : "";
   const petBit = intake.pets > 0 ? `, ${intake.pets} pet(s)` : "";
   return `Build a personalized 72-HOUR emergency kit checklist for a household of ${intake.adults} adult(s)${kidBit}${petBit} living in a ${intake.home_type} in the ${region.label} region (main hazards: ${region.hazards}). Their preparedness budget tier is "${budget.label}" (${budget.range}) — keep item suggestions realistic for that budget.
 
+IMPORTANT — water total is precomputed, use it verbatim, do NOT recompute: this household needs exactly ${wm.gallons_72h} gallons for 72 hours. Write exactly ${wm.gallons_72h} in "water_gallons_72h" below, and make the Water category's drinking-water item quantity exactly "${wm.gallons_72h} gallons".
+
 Respond with ONLY this JSON object:
 {
   "headline": "one encouraging sentence, specific to this household (max 120 chars)",
-  "water_gallons_72h": <number: total gallons for 72h — 1 gal/person/day drinking + 0.5 sanitation, kids count as persons>,
+  "water_gallons_72h": ${wm.gallons_72h},
   "categories": [
-    {"name": "category name", "items": [{"item": "item name", "qty": "quantity for THIS household, e.g. '9 gallons' or '3 per person'"}]}
+    {"name": "category name", "items": [{"item": "item name", "qty": "quantity for THIS household, e.g. '${wm.gallons_72h} gallons' or '3 per person'"}]}
   ]
 }
 Rules: at most 7 categories, at most 7 items per category. Quantities MUST be scaled to this household's size. Categories should cover: Water, Food, Light & Power, Warmth & Shelter, Health & Hygiene, Documents & Cash, and (if kids/pets) Kids / Pets as needed. Practical brand-agnostic items. No fear-mongering. No medical advice beyond a basic first-aid kit.`;
@@ -96,12 +99,15 @@ export async function onRequestPost({ request, env }) {
     });
 
     // Deterministic water math is the source of truth; the model value is advisory.
+    // Belt and suspenders: the prompt already pins the exact number verbatim,
+    // and alignWaterItems fixes any Water-category quantity the model invents.
     const wm = waterMath(intake);
+    const checklist = alignWaterItems(parsed.categories, wm.gallons_72h);
     return json({
       ok: true,
       headline: String(parsed.headline || "").slice(0, 140),
       water_gallons_72h: wm.gallons_72h,
-      checklist: parsed.categories.map((c) => ({
+      checklist: checklist.map((c) => ({
         name: String(c.name).slice(0, 60),
         items: c.items.map((it) => ({
           item: String(it.item).slice(0, 120),

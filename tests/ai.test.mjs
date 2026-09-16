@@ -75,5 +75,29 @@ t("empty category still rejected", validateTeaser({ headline: "x", water_gallons
   { name: "Light", items: [{ item: "Flashlight", qty: "1" }, { item: "Batteries", qty: "1" }] },
 ] }) === "bad_category_items");
 
+// Regression: live teaser returned Water item "7.5 gallons" while deterministic
+// water math for the same household is 13.5 gallons. alignWaterItems must make
+// the bulk-water qty agree with the deterministic number, and teaserUser must
+// pin the exact number in the prompt so the model can't recompute it.
+import { alignWaterItems, waterMath } from "../pwa/functions/_lib/validate.js";
+import { teaserUser } from "../pwa/functions/api/prepguide/teaser.js";
+
+const drifted = [
+  { name: "Water", items: [
+    { item: "Drinking water", qty: "7.5 gallons" },
+    { item: "Water filter", qty: "1 portable filter" },
+  ]},
+  { name: "Food", items: [{ item: "Rice", qty: "10 lbs" }] },
+];
+const aligned = alignWaterItems(drifted, 13.5);
+t("bulk water qty overridden to deterministic", aligned[0].items[0].qty === "13.5 gallons");
+t("treatment item untouched", aligned[0].items[1].qty === "1 portable filter");
+t("non-water category untouched", aligned[1].items[0].qty === "10 lbs");
+t("input not mutated", drifted[0].items[0].qty === "7.5 gallons");
+t("no Water category passes through", alignWaterItems([{ name: "Food", items: [{ item: "Rice", qty: "1 lb" }] }], 13.5)[0].items[0].qty === "1 lb");
+
+const prompt = teaserUser({ adults: 2, kids: 1, pets: 0, home_type: "house", region: "southeast", budget_tier: "practical", persons: 3 });
+t("prompt pins exact 13.5 verbatim", prompt.includes("exactly 13.5 gallons") && prompt.includes('"water_gallons_72h": 13.5'));
+
 console.log(`ai: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -9,7 +9,7 @@
 
 import { runJson } from "../../_lib/ai.js";
 import { renderPdf } from "../../_lib/renderPdf.js";
-import { validateIntake, householdLabel, waterMath, REGIONS, BUDGET_TIERS } from "../../_lib/validate.js";
+import { validateIntake, householdLabel, waterMath, alignWaterItems, REGIONS, BUDGET_TIERS } from "../../_lib/validate.js";
 
 const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
@@ -171,6 +171,12 @@ export async function onRequestPost({ request, env }) {
     }
 
     // ── render PDF ──
+    // Keep the paid checklist's Water quantities consistent with the
+    // deterministic water section (same class of model-math drift as teaser).
+    const wm = waterMath(intake);
+    if (parsed.checklist && Array.isArray(parsed.checklist.categories)) {
+      parsed.checklist.categories = alignWaterItems(parsed.checklist.categories, wm.gallons_72h);
+    }
     let pdf;
     try {
       pdf = await renderPdf(parsed, {

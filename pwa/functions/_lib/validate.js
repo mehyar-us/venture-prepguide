@@ -70,3 +70,30 @@ export function waterMath(intake) {
     gallons_14d: Math.round(perDay * 14 * 10) / 10,
   };
 }
+
+/**
+ * Post-process AI-generated checklist categories so the bulk-water item in a
+ * "Water" category agrees with deterministic water math (the source of truth).
+ * The model sometimes does its own water math and gets it wrong (live case:
+ * said "7.5 gallons" for a household whose deterministic total is 13.5).
+ * Only the first bulk-water item is overridden; treatment items (filters,
+ * tablets, bleach) are left alone.
+ */
+export function alignWaterItems(categories, gallons) {
+  const target = `${gallons} gallons`;
+  return (categories || []).map((c) => {
+    if (!c || !/water/i.test(String(c.name || ""))) return c;
+    let replaced = false;
+    const items = (c.items || []).map((it) => {
+      const text = `${it.item || ""} ${it.qty || ""}`;
+      const isBulk = /gallon|drinking water|water storage|store water|bottled water/i.test(text);
+      const isTreatment = /filter|purif|tablet|boil|bleach|treatment|test strip/i.test(text);
+      if (!replaced && isBulk && !isTreatment) {
+        replaced = true;
+        return { ...it, qty: target };
+      }
+      return it;
+    });
+    return { ...c, items };
+  });
+}
